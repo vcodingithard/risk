@@ -1,0 +1,7 @@
+source,target,weight
+Climate,Social,-0.25489198672509494
+Climate,Urban Infrastructure,0.6742992058149179
+Economy,Geopolitics,0.6476945835582806
+Economy,Trade,-0.28419035251147734
+Geopolitics,Trade,0.1464155912436216
+Social,Urban Infrastructure,-0.10869086734653458
