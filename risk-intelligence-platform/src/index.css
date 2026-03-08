@@ -1,60 +1,76 @@
 @import "tailwindcss";
 
-/* Global base layer */
-html, body, #root {
-height: 100%;
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  html {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
 }
 
-/* Cyber grid background */
+/* Global base layer */
+html, body, #root {
+  height: 100%;
+}
+
+/* Clean, premium dark background */
 body {
-background-color: #020617;
-background-image: radial-gradient(circle at 2px 2px, rgba(51, 65, 85, 0.15) 1px, transparent 0);
-background-size: 32px 32px;
+  background-color: #09090b; /* Zinc 950 */
+  color: #ffffff;
 }
 
 /* Leaflet map styling */
 .leaflet-container {
-width: 100%;
-height: 100%;
-background: #0f172a !important;
-border-radius: 0.75rem;
-outline: none;
+  width: 100%;
+  height: 100%;
+  background: #09090b !important;
+  border-radius: 1rem;
+  outline: none;
 }
 
 /* Leaflet popup styling */
 .leaflet-popup-content-wrapper {
-background: #1e293b !important;
-color: #f1f5f9 !important;
-border: 1px solid #334155 !important;
-backdrop-filter: blur(4px);
+  background: #18181b !important; /* Zinc 900 */
+  color: #ffffff !important;
+  border: 1px solid rgba(255,255,255,0.1) !important;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5) !important;
 }
 
-/* Thin scrollbar for tables */
+.leaflet-popup-tip {
+  background: #18181b !important;
+  border-top: 1px solid rgba(255,255,255,0.1);
+  border-left: 1px solid rgba(255,255,255,0.1);
+}
+
+/* Thin clean scrollbar */
 .custom-scrollbar::-webkit-scrollbar {
-width: 4px;
+  width: 6px;
+  height: 6px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
-background: rgba(30, 41, 59, 0.3);
+  background: transparent;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-background: #334155;
-border-radius: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-background: #475569;
+  background: rgba(255, 255, 255, 0.2);
 }
 
 /* Firefox scrollbar support */
 .custom-scrollbar {
-scrollbar-width: thin;
-scrollbar-color: #334155 rgba(30, 41, 59, 0.3);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
 }
 
 /* Recharts fix for flexbox layouts */
 .recharts-responsive-container {
-min-width: 0 !important;
-min-height: 0 !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
 }
