@@ -1,0 +1,10 @@
+Source,Target,Weight
+Climate,Economy,0.8
+Climate,Migration,0.6
+Economy,Social Stability,0.7
+Economy,Trade,0.5
+Migration,Urban Infrastructure,0.9
+Urban Infrastructure,Social Stability,0.6
+Social Stability,Geopolitical Sentiment,0.8
+Trade,Economy,0.6
+Climate,Trade,0.4
