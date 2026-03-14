@@ -1,285 +1,224 @@
-import React, { useEffect, useRef, useState, useMemo } from "react";
+import React, { useRef, useMemo, useEffect, useState, useCallback } from "react";
 import ForceGraph2D from "react-force-graph-2d";
+import * as d3 from "d3-force";
 
-export default function CascadingNetwork({ graphData }) {
+export default function CascadingNetwork({ graphData, riskScores }) {
+
   const fgRef = useRef();
   const containerRef = useRef();
 
-  const [dimensions, setDimensions] = useState({ width: 0, height: 450 });
-  const [hoverNode, setHoverNode] = useState(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
 
-  /*
-  ----------------------------------------------------
-  1. Add Dummy Simulation Data
-  ----------------------------------------------------
-  */
 
-  const enrichedGraphData = useMemo(() => {
-    return {
-      nodes: graphData.nodes.map((node) => ({
-        ...node,
-        score: node.score ?? Math.random(), // systemic risk
-        exposure: (Math.random() * 100).toFixed(1),
-        volatility: (Math.random() * 5).toFixed(2),
-        loss: (Math.random() * 40).toFixed(1)
-      })),
-      links: graphData.links
-    };
-  }, [graphData]);
-
-  /*
-  ----------------------------------------------------
-  2. Compute System Statistics
-  ----------------------------------------------------
-  */
-
-  const stats = useMemo(() => {
-    if (!enrichedGraphData.nodes.length) return null;
-
-    const scores = enrichedGraphData.nodes.map((n) => n.score);
-
-    const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
-    const max = Math.max(...scores);
-    const critical = scores.filter((s) => s > 0.6).length;
-
-    return {
-      avg: avg.toFixed(2),
-      max: max.toFixed(2),
-      critical
-    };
-  }, [enrichedGraphData]);
-
-  /*
-  ----------------------------------------------------
-  3. ForceGraph Layout Settings
-  ----------------------------------------------------
-  */
-
+  // Resize graph with container
   useEffect(() => {
-    if (fgRef.current && enrichedGraphData.nodes.length > 0) {
-      fgRef.current.d3Force("charge").strength(-400);
-      fgRef.current.d3Force("link").distance(130);
 
-      const t = setTimeout(() => fgRef.current.zoomToFit(600, 50), 500);
-
-      return () => clearTimeout(t);
-    }
-  }, [enrichedGraphData]);
-
-  /*
-  ----------------------------------------------------
-  4. Responsive Width
-  ----------------------------------------------------
-  */
-
-  useEffect(() => {
-    const updateDimensions = () => {
+    const resize = () => {
       if (containerRef.current) {
-        setDimensions({
+        setSize({
           width: containerRef.current.offsetWidth,
-          height: 450
+          height: containerRef.current.offsetHeight
         });
       }
     };
 
-    updateDimensions();
-    window.addEventListener("resize", updateDimensions);
+    resize();
 
-    return () => window.removeEventListener("resize", updateDimensions);
+    window.addEventListener("resize", resize);
+
+    return () => window.removeEventListener("resize", resize);
+
   }, []);
 
-  /*
-  ----------------------------------------------------
-  5. Custom Node Renderer
-  ----------------------------------------------------
-  */
 
-  const renderNode = (node, ctx, globalScale) => {
-    if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) return;
 
-    const risk = node.score || 0.2;
+  const processedData = useMemo(() => {
+    return {
+      nodes: graphData.nodes.map(node => ({
+        ...node,
+        score: riskScores[node.id]?.score || 0.3
+      })),
+      links: graphData.links.map(link => {
 
-    const r = Math.max(4, (risk * 25) / globalScale);
+        const sourceRisk = riskScores[link.source]?.score || 0.3;
 
-    let color = "#10b981";
+        return {
+          ...link,
+          speed: sourceRisk * 0.04,
+          color: sourceRisk > 0.6 ? "#ef4444" : "rgba(255,255,255,0.2)",
+          width: 1 + sourceRisk * 2
+        };
+      })
+    };
+  }, [graphData, riskScores]);
 
-    if (risk > 0.7) color = "#ef4444";
-    else if (risk > 0.4) color = "#f59e0b";
 
-    const fontSize = 12 / globalScale;
 
-    if (risk > 0.7) {
-      const glowRadius = r * 3;
+  // Layout forces
+  useEffect(() => {
 
-      const gradient = ctx.createRadialGradient(
-        node.x,
-        node.y,
-        0,
-        node.x,
-        node.y,
-        glowRadius
-      );
+    if (!fgRef.current) return;
 
-      gradient.addColorStop(0, "rgba(239,68,68,0.3)");
-      gradient.addColorStop(1, "rgba(239,68,68,0)");
+    const graph = fgRef.current;
 
-      ctx.fillStyle = gradient;
+    graph.d3Force("charge").strength(-700);
 
-      ctx.beginPath();
-      ctx.arc(node.x, node.y, glowRadius, 0, 2 * Math.PI);
-      ctx.fill();
-    }
+    graph.d3Force("link").distance(200);
 
-    ctx.beginPath();
-    ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
+    graph.d3Force("center", d3.forceCenter(0, 0));
 
-    ctx.fillStyle = color;
-    ctx.fill();
+    graph.d3Force("collision", d3.forceCollide(45));
 
-    ctx.strokeStyle = "#fff";
-    ctx.lineWidth = 1 / globalScale;
-    ctx.stroke();
+  }, []);
 
-    if (globalScale > 0.8) {
-      ctx.font = `600 ${fontSize}px Inter`;
 
-      ctx.textAlign = "center";
-      ctx.fillStyle = "white";
 
-      ctx.fillText(node.name, node.x, node.y + r + 12 / globalScale);
-    }
+  // Center graph after simulation
+  const handleEngineStop = () => {
+
+    if (!fgRef.current) return;
+
+    fgRef.current.centerAt(0, 0, 800);
+
+    fgRef.current.zoom(1.2, 800);
+
   };
 
+
+const drawNode = useCallback((node, ctx, globalScale) => {
+
+  // Guard: skip nodes without valid coordinates
+  if (
+    typeof node.x !== "number" ||
+    typeof node.y !== "number" ||
+    !isFinite(node.x) ||
+    !isFinite(node.y)
+  ) {
+    return;
+  }
+
+  const risk = node.score || 0.3;
+
+  const size = Math.max(6, risk * 22);
+
+  const pulse = Math.sin(Date.now() * 0.003) * 2;
+
+  const r = (size + pulse) / globalScale;
+
+  // Guard: radius must also be valid
+  if (!isFinite(r)) return;
+
+
+  ctx.shadowColor =
+    risk > 0.6
+      ? "rgba(239,68,68,0.9)"
+      : risk > 0.4
+      ? "rgba(245,158,11,0.8)"
+      : "rgba(16,185,129,0.8)";
+
+  ctx.shadowBlur = 25 / globalScale;
+
+
+  const gradient = ctx.createRadialGradient(
+    node.x,
+    node.y,
+    r * 0.2,
+    node.x,
+    node.y,
+    r * 1.5
+  );
+
+
+  if (risk > 0.6) {
+    gradient.addColorStop(0, "#ef4444");
+    gradient.addColorStop(1, "#7f1d1d");
+  } else if (risk > 0.4) {
+    gradient.addColorStop(0, "#f59e0b");
+    gradient.addColorStop(1, "#78350f");
+  } else {
+    gradient.addColorStop(0, "#10b981");
+    gradient.addColorStop(1, "#064e3b");
+  }
+
+
+  ctx.beginPath();
+  ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
+  ctx.fillStyle = gradient;
+  ctx.fill();
+
+
+  ctx.shadowBlur = 0;
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+
+  const label = node.name || node.id;
+
+  ctx.font = `bold ${12 / globalScale}px Inter`;
+  ctx.fillStyle = "#fff";
+  ctx.fillText(label, node.x, node.y - r - 10);
+
+
+  ctx.font = `${10 / globalScale}px Inter`;
+  ctx.fillStyle = "#facc15";
+  ctx.fillText((node.score || 0).toFixed(2), node.x, node.y + 3);
+
+}, []);
+
+
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
 
-      {/* HEADER */}
+   <div
+  ref={containerRef}
+  className="bg-gradient-to-br from-slate-950 to-black border border-slate-800 rounded-3xl overflow-hidden relative h-[520px] w-full shadow-2xl flex items-center justify-center"
+>
 
-      <div className="p-6 border-b border-slate-800 flex justify-between">
+      <div className="absolute top-4 left-4 z-10 bg-slate-900/80 backdrop-blur-sm px-5 py-3 rounded-xl border border-slate-800/50">
 
         <h3 className="text-white font-bold text-lg">
-          Neural Risk Propagation
+          Systemic Ripple Analysis
         </h3>
 
-        {stats && (
-          <div className="flex gap-6 text-right">
-
-            <div>
-              <p className="text-xs text-slate-500">Avg Risk</p>
-              <p className="text-emerald-400 font-mono">{stats.avg}</p>
-            </div>
-
-            <div>
-              <p className="text-xs text-slate-500">Max Impact</p>
-              <p className="text-rose-400 font-mono">{stats.max}</p>
-            </div>
-
-            <div>
-              <p className="text-xs text-slate-500">Critical</p>
-              <p className="text-white font-mono">{stats.critical}</p>
-            </div>
-
-          </div>
-        )}
-      </div>
-
-      {/* GRAPH AREA */}
-
-      <div
-        ref={containerRef}
-        className="relative bg-[#020617]"
-      >
-
-        {dimensions.width > 0 && enrichedGraphData.nodes.length > 0 ? (
-          <ForceGraph2D
-            ref={fgRef}
-            width={dimensions.width}
-            height={dimensions.height}
-            graphData={enrichedGraphData}
-            nodeCanvasObject={renderNode}
-            onNodeHover={(node) => setHoverNode(node)}
-
-            linkDirectionalParticles={4}
-            linkDirectionalParticleSpeed={(d) => (d.weight || 0.1) * 0.02}
-            linkDirectionalParticleWidth={1.5}
-            linkDirectionalParticleColor={() => "#fb7185"}
-
-            linkColor={() => "rgba(51,65,85,0.3)"}
-            linkWidth={(d) => (d.weight || 1) * 1.2}
-
-            backgroundColor="transparent"
-          />
-        ) : (
-          <div className="h-[450px] flex items-center justify-center text-slate-600">
-            CALIBRATING ENGINE...
-          </div>
-        )}
-
-        {/* HOVER PANEL */}
-
-        {hoverNode && (
-          <div className="absolute bottom-4 left-4 bg-slate-800/90 border border-slate-700 p-4 rounded-xl text-xs w-56">
-
-            <p className="text-white font-bold mb-2">
-              {hoverNode.name}
-            </p>
-
-            <div className="flex justify-between">
-              <span className="text-slate-400">Risk Score</span>
-              <span className="text-rose-400 font-mono">
-                {hoverNode.score.toFixed(2)}
-              </span>
-            </div>
-
-            <div className="flex justify-between">
-              <span className="text-slate-400">Exposure</span>
-              <span className="text-yellow-400 font-mono">
-                {hoverNode.exposure}%
-              </span>
-            </div>
-
-            <div className="flex justify-between">
-              <span className="text-slate-400">Volatility</span>
-              <span className="text-indigo-400 font-mono">
-                {hoverNode.volatility}
-              </span>
-            </div>
-
-            <div className="flex justify-between">
-              <span className="text-slate-400">Projected Loss</span>
-              <span className="text-red-500 font-mono">
-                {hoverNode.loss}%
-              </span>
-            </div>
-
-          </div>
-        )}
+        <p className="text-xs text-slate-400">
+          Particle velocity indicates risk propagation intensity
+        </p>
 
       </div>
 
-      {/* SYSTEMIC STRESS BAR */}
 
-      {stats && (
-        <div className="p-4 border-t border-slate-800 text-xs text-slate-400">
+       <div className="w-[80%] h-[90%]">
 
-          <div className="flex justify-between mb-1">
-            <span>Systemic Stress Level</span>
-            <span className="text-rose-400 font-mono">
-              {stats.max}
-            </span>
-          </div>
+    <ForceGraph2D
+      ref={fgRef}
+      width={size.width * 0.8}
+      height={size.height * 0.9}
+      graphData={processedData}
+      nodeCanvasObject={drawNode}
+      backgroundColor="#020617"
 
-          <div className="w-full h-2 bg-slate-800 rounded">
+      linkDirectionalParticles={4}
+      linkDirectionalParticleSpeed={d => d.speed}
+      linkDirectionalParticleWidth={2}
 
-            <div
-              className="h-2 bg-gradient-to-r from-green-400 via-yellow-400 to-red-500 rounded"
-              style={{ width: `${stats.max * 100}%` }}
-            />
+      linkColor={d => d.color}
+      linkWidth={d => d.width}
 
-          </div>
+      linkOpacity={0.35}
 
-        </div>
-      )}
+      enableZoomInteraction={true}
+      enablePanInteraction={true}
+      enableNodeDrag={true}
+
+      cooldownTicks={120}
+      onEngineStop={handleEngineStop}
+
+    />
+
+  </div>
+
     </div>
+
   );
+
 }
