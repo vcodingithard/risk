@@ -96,86 +96,67 @@ function App() {
     if (score > 0.4) return 'Medium';
     return 'Low';
   };
-async function runCascade(steps) {
+  async function runCascade(steps) {
 
-  for (let step of steps) {
+    for (let step of steps) {
 
-    setActiveLinks([step]);
+      setActiveLinks([step]);
 
-    await new Promise(resolve => setTimeout(resolve, 600));
+      await new Promise(resolve => setTimeout(resolve, 600));
 
+    }
+
+    setActiveLinks([]);
   }
-
-  setActiveLinks([]);
-}
   const handleSimulate = (indicators) => {
-    if (!data.matrix.length) return;
+  if (!data.matrix.length) return;
 
-    // 1. Map Sliders to Primary Shocks
-    const primaryShocks = {
-      'Climate': (Math.abs(indicators.rainfall) / 60) * 0.4 + (indicators.temperature / 3) * 0.6,
-      'Economy': ((indicators.inflation - 4) / 8) * 0.4 + ((indicators.interest - 5) / 7) * 0.6,
-      'Social Stability': (indicators.unemployment / 13) * 0.5 + (indicators.foodPrices / 250) * 0.5,
-      'Urban Infrastructure': (indicators.pollution / 250) * 0.5 + (indicators.urbanGrowth / 5) * 0.5,
-      'Migration': (indicators.migration / 30) * 0.8,
-      'Trade': (indicators.tradeImbalance / 20) * 0.8
-    };
+  // 1. Calculate Primary Shocks (Scaled down to 0-1 range)
+  const primaryShocks = {
+    'Climate': (Math.abs(indicators.rainfall) / 100) * 0.2 + (indicators.temperature / 5) * 0.3,
+    'Economy': ((indicators.inflation - 4) / 20) * 0.3,
+    // ... apply similar scaling to others
+  };
 
-    // 2. Initialize scores with base data
-    const nextScores = JSON.parse(JSON.stringify(currentScores));
-    const propagationSteps = [];
-    Object.keys(nextScores).forEach(s => nextScores[s].score = nextScores[s].baseScore);
+  const nextScores = JSON.parse(JSON.stringify(currentScores));
+  const propagationSteps = [];
 
-    // 3. Multi-Pass Propagation (Simulating the ripple)
-    // Pass 1: Primary Shock from Sliders
-    Object.entries(primaryShocks).forEach(([sector, intensity]) => {
-      if (nextScores[sector]) nextScores[sector].score += intensity;
-    });
+  // 2. Reset to base but allow for "Delta"
+  Object.keys(nextScores).forEach(s => {
+    // Start from baseScore, but don't let it exceed a threshold before ripples
+    nextScores[s].score = nextScores[s].baseScore; 
+  });
 
-    // Pass 2: Matrix Propagation (How Sector A hits Sector B)
-    const matrixMap = {};
-    data.matrix.forEach(row => { matrixMap[row.Sector] = row; });
+  // 3. Matrix Propagation with Dampening
+  data.matrix.forEach(row => {
+    const sourceSector = row.Sector;
+    if (!nextScores[sourceSector]) return;
 
-    Object.keys(nextScores).forEach(sourceSector => {
-      const shockLevel = nextScores[sourceSector].score;
-      const connections = matrixMap[sourceSector];
+    Object.keys(row).forEach(targetSector => {
+      if (targetSector !== 'Sector' && nextScores[targetSector]) {
+        const weight = parseFloat(row[targetSector]) || 0;
+        // The "Shock" should be the difference caused by the simulator
+        const shockSource = primaryShocks[sourceSector] || 0;
+        const transfer = shockSource * weight * 0.5; // 0.5 is a dampening factor
 
-      if (connections) {
-        Object.keys(connections).forEach(targetSector => {
-          if (targetSector !== 'Sector' && nextScores[targetSector]) {
-            const weight = parseFloat(connections[targetSector]) || 0;
-            const transfer = shockLevel * weight * 0.3;
-
-            nextScores[targetSector].score += transfer;
-
-            propagationSteps.push({
-              source: sourceSector,
-              target: targetSector,
-              value: transfer
-            });
-          }
-        });
+        if (transfer > 0.01) {
+          nextScores[targetSector].score += transfer;
+          propagationSteps.push({ source: sourceSector, target: targetSector, value: transfer });
+        }
       }
     });
+  });
 
-    // 4. Final Processing
-    Object.keys(nextScores).forEach(key => {
-      nextScores[key].score = Math.min(Math.max(nextScores[key].score, 0), 0.95);
-      nextScores[key].level = getLevel(nextScores[key].score);
-    });
+  // 4. Final Processing with a more realistic Cap
+  Object.keys(nextScores).forEach(key => {
+    // Ensure we don't just stay at 0.95 unless it's truly catastrophic
+    nextScores[key].score = Math.min(nextScores[key].score, 0.98); 
+    nextScores[key].level = getLevel(nextScores[key].score);
+  });
 
-    setCurrentScores(nextScores);
-runCascade(propagationSteps);
-    // Update Graph Nodes to reflect new "Realistic" sizes
-    setGraphData(prev => ({
-      ...prev,
-      nodes: prev.nodes.map(node => ({
-        ...node,
-        score: nextScores[node.id]?.score || 0.3,
-        val: 15 + (nextScores[node.id]?.score * 40) // Sizes grow based on risk
-      }))
-    }));
-  };
+  setCurrentScores(nextScores);
+  runCascade(propagationSteps);
+};
 
   if (loading) {
     return <div className="flex h-screen items-center justify-center bg-slate-950 text-slate-300">Initializing Core Engine...</div>;

@@ -2,223 +2,162 @@ import React, { useRef, useMemo, useEffect, useState, useCallback } from "react"
 import ForceGraph2D from "react-force-graph-2d";
 import * as d3 from "d3-force";
 
-export default function CascadingNetwork({ graphData, riskScores }) {
+const defaultGraph = {
+  nodes: [
+    { id: "Climate", name: "Climate", baseRisk: 0.95 },
+    { id: "Economy", name: "Economy", baseRisk: 0.82 },
+    { id: "Trade", name: "Trade", baseRisk: 0.75 },
+    { id: "Social Stability", name: "Social Stability", baseRisk: 0.65 },
+    { id: "Urban Infrastructure", name: "Urban Infra", baseRisk: 0.45 },
+    { id: "Migration", name: "Migration", baseRisk: 0.55 },
+  ],
+  links: [
+    { source: "Climate", target: "Economy" },
+    { source: "Economy", target: "Trade" },
+    { source: "Economy", target: "Social Stability" },
+    { source: "Social Stability", target: "Migration" },
+    { source: "Urban Infrastructure", target: "Social Stability" },
+  ]
+};
 
+export default function EnhancedCascadingNetwork({ graphData = defaultGraph, riskScores = {} }) {
   const fgRef = useRef();
   const containerRef = useRef();
+  const [dimensions, setDimensions] = useState({ width: 0, height: 600 });
+  const [hoverNode, setHoverNode] = useState(null);
+  const [highlightNodes, setHighlightNodes] = useState(new Set());
+  const [highlightLinks, setHighlightLinks] = useState(new Set());
 
-  const [size, setSize] = useState({ width: 0, height: 0 });
-
-
-  // Resize graph with container
+  // Handle Resize to ensure canvas fills container
   useEffect(() => {
-
-    const resize = () => {
+    if (containerRef.current) {
+      setDimensions({
+        width: containerRef.current.offsetWidth,
+        height: containerRef.current.offsetHeight
+      });
+    }
+    
+    const handleResize = () => {
       if (containerRef.current) {
-        setSize({
+        setDimensions({
           width: containerRef.current.offsetWidth,
           height: containerRef.current.offsetHeight
         });
       }
     };
 
-    resize();
-
-    window.addEventListener("resize", resize);
-
-    return () => window.removeEventListener("resize", resize);
-
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
   }, []);
-
-
 
   const processedData = useMemo(() => {
     return {
       nodes: graphData.nodes.map(node => ({
         ...node,
-        score: riskScores[node.id]?.score || 0.3
+        score: riskScores[node.id]?.score || node.baseRisk || 0.5
       })),
-      links: graphData.links.map(link => {
-
-        const sourceRisk = riskScores[link.source]?.score || 0.3;
-
-        return {
-          ...link,
-          speed: sourceRisk * 0.04,
-          color: sourceRisk > 0.6 ? "#ef4444" : "rgba(255,255,255,0.2)",
-          width: 1 + sourceRisk * 2
-        };
-      })
+      links: graphData.links.map(link => ({
+        ...link,
+        source: typeof link.source === 'object' ? link.source.id : link.source,
+        target: typeof link.target === 'object' ? link.target.id : link.target
+      }))
     };
   }, [graphData, riskScores]);
 
-
-
-  // Layout forces
-  useEffect(() => {
-
-    if (!fgRef.current) return;
-
-    const graph = fgRef.current;
-
-    graph.d3Force("charge").strength(-700);
-
-    graph.d3Force("link").distance(200);
-
-    graph.d3Force("center", d3.forceCenter(0, 0));
-
-    graph.d3Force("collision", d3.forceCollide(45));
-
-  }, []);
-
-
-
-  // Center graph after simulation
+  // Center the graph once the simulation starts/stops
   const handleEngineStop = () => {
-
-    if (!fgRef.current) return;
-
-    fgRef.current.centerAt(0, 0, 800);
-
-    fgRef.current.zoom(1.2, 800);
-
+    if (fgRef.current) {
+      fgRef.current.zoomToFit(400, 100);
+    }
   };
 
+  const handleNodeHover = (node) => {
+    highlightNodes.clear();
+    highlightLinks.clear();
+    if (node) {
+      highlightNodes.add(node.id);
+      processedData.links.forEach(link => {
+        const s = link.source.id || link.source;
+        const t = link.target.id || link.target;
+        if (s === node.id || t === node.id) {
+          highlightLinks.add(link);
+          highlightNodes.add(s);
+          highlightNodes.add(t);
+        }
+      });
+    }
+    setHoverNode(node || null);
+    setHighlightNodes(new Set(highlightNodes));
+    setHighlightLinks(new Set(highlightLinks));
+  };
 
-const drawNode = useCallback((node, ctx, globalScale) => {
+  const drawNode = useCallback((node, ctx, globalScale) => {
+    const isHighlighted = highlightNodes.has(node.id) || highlightNodes.size === 0;
+    const alpha = isHighlighted ? 1 : 0.1;
+    const risk = node.score || 0.5;
+    
+    const radius = Math.max(12, risk * 35) / globalScale;
+    const color = risk > 0.6 ? "#ff4d4d" : risk > 0.5 ? "#fbbf24" : "#22c55e";
 
-  // Guard: skip nodes without valid coordinates
-  if (
-    typeof node.x !== "number" ||
-    typeof node.y !== "number" ||
-    !isFinite(node.x) ||
-    !isFinite(node.y)
-  ) {
-    return;
-  }
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    
+    // Shadow/Glow
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 20 / globalScale;
 
-  const risk = node.score || 0.3;
+    // Node Circle
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI);
+    ctx.fillStyle = color;
+    ctx.fill();
 
-  const size = Math.max(6, risk * 22);
+    // Text Label
+    ctx.shadowBlur = 0;
+    ctx.font = `bold ${14 / globalScale}px Inter`;
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#fff";
+    ctx.fillText(node.name || node.id, node.x, node.y - radius - 8);
 
-  const pulse = Math.sin(Date.now() * 0.003) * 2;
+    // Score inside
+    ctx.font = `bold ${11 / globalScale}px monospace`;
+    ctx.fillStyle = "rgba(0,0,0,0.8)";
+    ctx.fillText(risk.toFixed(2), node.x, node.y + 4);
 
-  const r = (size + pulse) / globalScale;
-
-  // Guard: radius must also be valid
-  if (!isFinite(r)) return;
-
-
-  ctx.shadowColor =
-    risk > 0.6
-      ? "rgba(239,68,68,0.9)"
-      : risk > 0.4
-      ? "rgba(245,158,11,0.8)"
-      : "rgba(16,185,129,0.8)";
-
-  ctx.shadowBlur = 25 / globalScale;
-
-
-  const gradient = ctx.createRadialGradient(
-    node.x,
-    node.y,
-    r * 0.2,
-    node.x,
-    node.y,
-    r * 1.5
-  );
-
-
-  if (risk > 0.6) {
-    gradient.addColorStop(0, "#ef4444");
-    gradient.addColorStop(1, "#7f1d1d");
-  } else if (risk > 0.4) {
-    gradient.addColorStop(0, "#f59e0b");
-    gradient.addColorStop(1, "#78350f");
-  } else {
-    gradient.addColorStop(0, "#10b981");
-    gradient.addColorStop(1, "#064e3b");
-  }
-
-
-  ctx.beginPath();
-  ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
-  ctx.fillStyle = gradient;
-  ctx.fill();
-
-
-  ctx.shadowBlur = 0;
-
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-
-
-  const label = node.name || node.id;
-
-  ctx.font = `bold ${12 / globalScale}px Inter`;
-  ctx.fillStyle = "#fff";
-  ctx.fillText(label, node.x, node.y - r - 10);
-
-
-  ctx.font = `${10 / globalScale}px Inter`;
-  ctx.fillStyle = "#facc15";
-  ctx.fillText((node.score || 0).toFixed(2), node.x, node.y + 3);
-
-}, []);
-
+    ctx.restore();
+  }, [highlightNodes]);
 
   return (
-
-   <div
-  ref={containerRef}
-  className="bg-gradient-to-br from-slate-950 to-black border border-slate-800 rounded-3xl overflow-hidden relative h-[520px] w-full shadow-2xl flex items-center justify-center"
->
-
-      <div className="absolute top-4 left-4 z-10 bg-slate-900/80 backdrop-blur-sm px-5 py-3 rounded-xl border border-slate-800/50">
-
-        <h3 className="text-white font-bold text-lg">
-          Systemic Ripple Analysis
-        </h3>
-
-        <p className="text-xs text-slate-400">
-          Particle velocity indicates risk propagation intensity
-        </p>
-
+    <div 
+      ref={containerRef}
+      className="w-full h-[600px] bg-[#050505] rounded-3xl border border-slate-800 relative overflow-hidden"
+    >
+      {/* Legend & HUD */}
+      <div className="absolute top-6 left-6 z-20 pointer-events-none">
+        <h2 className="text-xl font-bold text-white uppercase italic">Systemic Ripple Analysis</h2>
+        <p className="text-slate-500 text-xs">Dynamic Inter-sector Dependency Map</p>
       </div>
 
-
-       <div className="w-[80%] h-[90%]">
-
-    <ForceGraph2D
-      ref={fgRef}
-      width={size.width * 0.8}
-      height={size.height * 0.9}
-      graphData={processedData}
-      nodeCanvasObject={drawNode}
-      backgroundColor="#020617"
-
-      linkDirectionalParticles={4}
-      linkDirectionalParticleSpeed={d => d.speed}
-      linkDirectionalParticleWidth={2}
-
-      linkColor={d => d.color}
-      linkWidth={d => d.width}
-
-      linkOpacity={0.35}
-
-      enableZoomInteraction={true}
-      enablePanInteraction={true}
-      enableNodeDrag={true}
-
-      cooldownTicks={120}
-      onEngineStop={handleEngineStop}
-
-    />
-
-  </div>
-
+      <ForceGraph2D
+        ref={fgRef}
+        width={dimensions.width}
+        height={dimensions.height}
+        graphData={processedData}
+        nodeCanvasObject={drawNode}
+        onNodeHover={handleNodeHover}
+        onEngineStop={handleEngineStop}
+        backgroundColor="rgba(0,0,0,0)"
+        
+        // Links
+        linkDirectionalParticles={4}
+        linkDirectionalParticleSpeed={0.01}
+        linkColor={() => "rgba(255,255,255,0.1)"}
+        linkWidth={1}
+        
+        // Forces to spread out the nodes
+        d3VelocityDecay={0.3}
+        cooldownTicks={100}
+      />
     </div>
-
   );
-
 }
